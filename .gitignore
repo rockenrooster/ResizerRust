@@ -1,0 +1,7 @@
+/target/
+/dist/
+/artifacts/
+/.cargo/config.toml
+/*.exe
+/*.pdb
+*.old

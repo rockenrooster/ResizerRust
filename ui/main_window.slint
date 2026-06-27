@@ -1,0 +1,832 @@
+import { LineEdit, ComboBox, SpinBox, ListView, Slider } from "std-widgets.slint";
+
+export global AppGlobals {
+    in-out property <string> output-path: "C:\\img";
+    in-out property <int> quality: 95;
+    in-out property <int> resolution: 100;
+    in-out property <int> threads: 4;
+    in-out property <int> max-threads: 1;
+    in-out property <string> format: "jpg";
+    in-out property <bool> preserve-structure: false;
+    in-out property <string> resize-mode: "percent"; // "percent" or "max"
+    in-out property <int> max-width: 3840;
+    in-out property <int> max-height: 2160;
+    in-out property <string> max-res-preset: "4k";
+    in-out property <string> resize-filter: "catmullrom";
+    in-out property <[[StandardListViewItem]]> file-rows: [];
+    in-out property <[[StandardListViewItem]]> failed-file-rows: [];
+    in-out property <string> active-tab: "files";
+    
+    in-out property <string> num-files-text: "0";
+    in-out property <string> before-size-text: "0.000";
+    in-out property <string> after-size-text: "0.000";
+    in-out property <string> completed-files-text: "0";
+    in-out property <string> mb-per-sec-text: "0.00";
+    in-out property <string> percent-saved-text: "0.00";
+    in-out property <string> elapsed-time-text: "0.00";
+    in-out property <float> progress: 0;
+    in-out property <bool> is-converting: false;
+    in-out property <bool> is-scanning-drop: false;
+    in-out property <float> drop-progress: 0;
+    in-out property <string> drop-status-text: "";
+    callback open-file(string, int);
+    
+    callback start-conversion();
+    callback cancel-conversion();
+    callback browse-folder();
+    callback clear-files();
+    callback optimal-settings();
+    callback set-max-res-preset(string);
+}
+
+component ProgressBar inherits Rectangle {
+    in-out property <float> value;
+    in property <brush> fill-color: #4CAF50;
+    
+    background: #e0e0e0;
+    border-radius: 5px;
+    clip: true;
+    
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width * value / 100.0;
+        height: 100%;
+        background: fill-color;
+        border-radius: 5px;
+    }
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> high_contrast: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    min-height: 30px;
+    min-width: 90px;
+    border-radius: 4px;
+
+    background: primary ? #2f6feb : #ffffff;
+    border-width: 1px;
+    border-color: primary ? #1f55c0 : #bebebe;
+
+    states [
+        disabled when !root.enabled : {
+            background: primary ? #a9c1f7 : #f0f0f0;
+            border-color: primary ? #8aa7e0 : #cfcfcf;
+        }
+        hover when touch.has-hover : {
+            background: primary
+                ? (high_contrast ? #002f8f : #00339a)
+                : (high_contrast ? #f2f2f2 : #cbe9ff);
+            border-color: primary
+                ? (high_contrast ? #00256f : #2a6be0)
+                : (high_contrast ? #000000 : #999999);
+        }
+        pressed when touch.pressed : {
+            background: primary
+                ? (high_contrast ? #001f5f : #76a3ff)
+                : (high_contrast ? #e6e6e6 : #ededed);
+            border-color: primary
+                ? (high_contrast ? #001748 : #1f4aa6)
+                : (high_contrast ? #000000 : #000000);
+        }
+    ]
+
+    Text {
+        text: root.text;
+        color: !root.enabled ? #7a7a7a : (primary ? #ffffff : #000000);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        //font-weight: 600;
+        font-size: 12px;
+    }
+
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component TabButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    min-height: 26px;
+    min-width: 70px;
+    border-radius: 4px;
+    background: active ? #ffffff : #f5f5f5;
+    border-width: 1px;
+    border-color: active ? #2f6feb : #cfcfcf;
+
+    states [
+        disabled when !root.enabled : {
+            background: #f0f0f0;
+            border-color: #d7d7d7;
+        }
+        hover when touch.has-hover : {
+            background: active ? #ffffff : #ededed;
+        }
+        pressed when touch.pressed : {
+            background: #e6e6e6;
+        }
+    ]
+
+    Text {
+        text: root.text;
+        color: !root.enabled ? #7a7a7a : (root.active ? #000000 : #333333);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: 12px;
+    }
+
+    underline := Rectangle {
+        visible: root.active;
+        x: 3px;
+        y: parent.height - 3px;
+        width: parent.width - 6px;
+        height: 2px;
+        background: #2f6feb;
+        border-radius: 2px;
+    }
+
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component TableViewColumn inherits Rectangle {
+    in property <SortOrder> sort-order: SortOrder.unsorted;
+    in property <brush> header-background: #ffffff;
+
+    callback clicked <=> touch-area.clicked;
+    callback adjust_size(length);
+
+    background: root.header-background;
+
+    states [
+        pressed when touch-area.pressed : {
+            background: #e6e6e6;
+        }
+        hover when touch-area.has-hover : {
+            background: #f2f2f2;
+        }
+    ]
+
+    touch-area := TouchArea {
+        width: parent.width - 12px;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 2px;
+
+        HorizontalLayout {
+            @children
+        }
+
+    }
+
+    // border
+    Rectangle {
+        y: parent.height - self.height;
+        width: 100%;
+        height: 1px;
+        background: #c0c0c0;
+    }
+
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+
+        states [
+            hover when movable-touch-area.has-hover : {
+                background: #e6e6e6;
+            }
+        ]
+
+        animate background { duration: 150ms; }
+
+        movable-touch-area := TouchArea {
+            width: 10px;
+            mouse-cursor: ew-resize;
+
+            moved => {
+                if (self.pressed) {
+                    adjust_size(self.mouse-x - self.pressed-x);
+                }
+            }
+        }
+    }
+}
+
+component TableViewCell inherits Rectangle {
+    clip: true;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+
+        @children
+    }
+}
+
+component TableViewRow inherits Rectangle {
+    in property <bool> selected;
+    in property <bool> even;
+    in property <brush> even-background: #ffffff;
+    in property <brush> odd-background: #f7f7f7;
+    in property <brush> hover-background: #efefef;
+    in property <brush> pressed-background: #e6e6e6;
+    in property <brush> selected-background: #d9e6ff;
+
+    callback clicked <=> touch-area.clicked;
+    callback double-clicked <=> touch-area.double-clicked;
+    callback pointer-event(event: PointerEvent, position: Point);
+
+    min-width: layout.min-width;
+    min-height: max(24px, layout.min-height);
+    border-radius: 4px;
+    background: root.even ? root.even-background : root.odd-background;
+
+    states [
+        pressed when touch-area.pressed : {
+            root.background: selected ? root.selected-background : root.pressed-background;
+        }
+        hover when touch-area.has-hover : {
+            root.background: selected ? root.selected-background : root.hover-background;
+            selector.height: root.selected ? 16px : 0;
+        }
+        selected when root.selected : {
+            root.background: root.selected-background;
+            selector.height: 16px;
+        }
+    ]
+
+    touch-area := TouchArea {
+        pointer-event(pe) => {
+            root.pointer-event(pe, {
+                x: self.absolute-position.x + self.mouse-x,
+                y: self.absolute-position.y + self.mouse-y,
+            });
+        }
+    }
+
+    layout := HorizontalLayout {
+       @children
+    }
+
+    selector := Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 3px;
+        height: 0px;
+        background: #2f6feb;
+        border-radius: 2px;
+
+        animate height { duration: 150ms; easing: ease-out; }
+    }
+}
+
+component BlackHeaderTableView {
+    in property <[[StandardListViewItem]]> rows;
+    out property <int> current-sort-column: -1;
+    in-out property <[TableColumn]> columns;
+    in-out property <int> current-row: -1;
+    in property <bool> enabled <=> scroll-view.enabled;
+    out property <length> visible-width <=> scroll-view.visible-width;
+    out property <length> visible-height <=> scroll-view.visible-height;
+    in-out property <bool> has-focus <=> scroll-view.has-focus;
+    in-out property <length> viewport-width <=> scroll-view.viewport-width;
+    in-out property <length> viewport-height <=> scroll-view.viewport-height;
+    in-out property <length> viewport-x <=> scroll-view.viewport-x;
+    in-out property <length> viewport-y <=> scroll-view.viewport-y;
+    in property <ScrollBarPolicy> vertical-scrollbar-policy <=> scroll-view.vertical-scrollbar-policy;
+    in property <ScrollBarPolicy> horizontal-scrollbar-policy <=> scroll-view.horizontal-scrollbar-policy;
+    in property <bool> mouse-drag-pan-enabled <=> scroll-view.mouse-drag-pan-enabled;
+    in property <brush> header-background: #ffffff;
+    in property <brush> row-even-background: #ffffff;
+    in property <brush> row-odd-background: #f7f7f7;
+    in property <brush> row-hover-background: #efefef;
+    in property <brush> row-pressed-background: #e6e6e6;
+    in property <brush> row-selected-background: #d9e6ff;
+
+    callback sort-ascending(column: int);
+    callback sort-descending(column: int);
+    callback row-pointer-event(row: int, event: PointerEvent, position: Point);
+    callback row-double-clicked(row: int);
+    callback current-row-changed(current-row: int);
+
+    public function set-current-row(index: int) {
+        if (index < 0 || index >= rows.length) {
+            return;
+        }
+
+        current-row = index;
+        current-row-changed(current-row);
+
+        if (current-item-y < 0) {
+            scroll-view.viewport-y += 0 - current-item-y;
+        }
+
+        if (current-item-y + item-height > scroll-view.visible-height) {
+            scroll-view.viewport-y -= current-item-y + item-height - scroll-view.visible-height;
+        }
+    }
+
+    private property <length> min-header-height: 42px;
+    private property <length> item-height: scroll-view.viewport-height / rows.length;
+    private property <length> current-item-y: scroll-view.viewport-y + current-row * item-height;
+
+    function sort(index: int) {
+        if (root.current-sort-column != index) {
+            root.columns[root.current-sort-column].sort-order = SortOrder.unsorted;
+        }
+
+        if(root.columns[index].sort-order == SortOrder.ascending) {
+            root.columns[index].sort-order = SortOrder.descending;
+            root.sort-descending(index);
+        } else {
+            root.columns[index].sort-order = SortOrder.ascending;
+            root.sort-ascending(index);
+        }
+
+        root.current-sort-column = index;
+    }
+
+    min-width: 400px;
+    min-height: 200px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    forward-focus: focus-scope;
+    accessible-role: table;
+
+    VerticalLayout {
+        Rectangle {
+            clip: true;
+            vertical-stretch: 0;
+            min-height: header-layout.min-height;
+
+            header-layout := HorizontalLayout {
+                width: max(self.preferred-width, parent.width);
+                x: scroll-view.viewport-x;
+                padding-right: 6px;
+                min-height: root.min-header-height;
+
+                for column[index] in root.columns : TableViewColumn {
+                    sort-order: column.sort-order;
+                    header-background: root.header-background;
+                    horizontal-stretch: column.horizontal-stretch;
+                    min-width: max(column.min-width, column.width);
+                    preferred-width: self.min-width;
+                    max-width: (index < columns.length && column.width >= 1px) ? max(column.min-width, column.width) : 100000px;
+
+                    clicked => {
+                        root.sort(index);
+                    }
+
+                    adjust-size(diff) => {
+                        column.width = max(1px, self.width + diff);
+                    }
+
+                    Text {
+                        vertical-alignment: center;
+                        text: column.title;
+                        //font-weight: 600;
+                        font-size: 12px;
+                        color: #000000;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        scroll-view := ListView {
+            for row[idx] in root.rows : TableViewRow {
+                selected: idx == root.current-row;
+                even: mod(idx, 2) == 0;
+                even-background: root.row-even-background;
+                odd-background: root.row-odd-background;
+                hover-background: root.row-hover-background;
+                pressed-background: root.row-pressed-background;
+                selected-background: root.row-selected-background;
+
+                pointer-event(pe, pos) => {
+                    root.row-pointer-event(idx, pe, {
+                        x: pos.x - root.absolute-position.x,
+                        y: pos.y - root.absolute-position.y,
+                    });
+                }
+
+                clicked => {
+                    root.focus();
+                    root.set-current-row(idx);
+                }
+                double-clicked => {
+                    root.row-double-clicked(idx);
+                }
+
+                for cell[index] in row : TableViewCell {
+                    private property <bool> has_inner_focus;
+
+                    horizontal-stretch: root.columns[index].horizontal-stretch;
+                    min-width: max(columns[index].min-width, columns[index].width);
+                    preferred-width: self.min-width;
+                    max-width: (index < columns.length && columns[index].width >= 1px) ? max(columns[index].min-width, columns[index].width) : 100000px;
+
+                    Rectangle {
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            text: cell.text;
+                            //font-weight: 400;
+                            color: #000000;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0;
+        width: 0; // Do not react on clicks
+
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                root.set-current-row(root.current-row - 1);
+                return accept;
+            } else if (event.text == Key.DownArrow) {
+                root.set-current-row(root.current-row + 1);
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "ResizerRust 1.0.0 - Batch Image Converter";
+    width: 860px;
+    height: 570px;
+    //default-font-family: "Segoe UI";
+    default-font-size: 12px;
+    resize-border-width: 6px;
+    icon: @image-url("../resizerrust.ico");
+    
+    Rectangle {
+        background: #f0f0f0;
+        
+        // Content (top) + Progress bar (absolute bottom)
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height - 24px;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                // Main Split Layout
+                HorizontalLayout {
+                    spacing: 10px;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+
+                    // Left: File list
+                    Rectangle {
+                        min-width: 560px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: #cfcfcf;
+                        background: transparent;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 6px;
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Input Files (Drag and Drop):";
+                                    //font-weight: 700;
+                                    color: #000000;
+                                    font-size: 12px;
+                                }
+                                ActionButton {
+                                    text: "Clear All";
+                                    clicked => { AppGlobals.clear-files(); }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                TabButton {
+                                    text: "Files";
+                                    active: AppGlobals.active-tab == "files";
+                                    clicked => { AppGlobals.active-tab = "files"; }
+                                }
+                                if AppGlobals.failed-file-rows.length > 0 : TabButton {
+                                    text: "Failed (" + AppGlobals.failed-file-rows.length + ")";
+                                    active: AppGlobals.active-tab == "failed";
+                                    clicked => { AppGlobals.active-tab = "failed"; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            if AppGlobals.active-tab == "files" || AppGlobals.failed-file-rows.length == 0 : Rectangle {
+                                background: #b2b2b2;
+                                border-width: 2px;
+                                border-color: #c0c0c0;
+                                border-radius: 5px;
+                                vertical-stretch: 1;
+                                min-height: 360px;
+                                clip: true;
+
+                                BlackHeaderTableView {
+                                    rows: AppGlobals.file-rows;
+                                    columns: [
+                                        { title: "File Path", min-width: 220px, horizontal-stretch: 3 },
+                                        { title: "Size", min-width: 80px, horizontal-stretch: 1 },
+                                    ];
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                    horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
+                                    mouse-drag-pan-enabled: true;
+                                    row-double-clicked(row) => { AppGlobals.open-file("files", row); }
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width + 5px;
+                                    height: parent.height;
+                                }
+
+                                Text {
+                                    visible: AppGlobals.file-rows.length == 0;
+                                    text: "No files selected. Drag and drop images here.";
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    color: #000000;
+                                    font-italic: false;
+                                    font-size: 14px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                }
+                            }
+
+                            if AppGlobals.active-tab == "failed" && AppGlobals.failed-file-rows.length > 0 : Rectangle {
+                                border-radius: 5px;
+                                border-width: 1px;
+                                border-color: #f2b6b6;
+                                background: #ffecec;
+                                min-height: 360px;
+                                vertical-stretch: 1;
+                                clip: true;
+
+                                VerticalLayout {
+                                    padding: 6px;
+                                    spacing: 4px;
+
+                                    Text {
+                                        text: "Failed Files";
+                                        color: #b00020;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                    }
+
+                                    BlackHeaderTableView {
+                                        rows: AppGlobals.failed-file-rows;
+                                        columns: [
+                                            { title: "File Path", min-width: 220px, horizontal-stretch: 2 },
+                                            { title: "Error", min-width: 140px, horizontal-stretch: 3 },
+                                        ];
+                                        header-background: #ffecec;
+                                        row-even-background: #fff5f5;
+                                        row-odd-background: #ffecec;
+                                        row-hover-background: #f8dada;
+                                        row-pressed-background: #f2caca;
+                                        row-selected-background: #f0c0c0;
+                                        vertical-scrollbar-policy: ScrollBarPolicy.always-on;
+                                        horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
+                                        mouse-drag-pan-enabled: true;
+                                        row-double-clicked(row) => { AppGlobals.open-file("failed", row); }
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Right: Controls
+                    Rectangle {
+                        min-width: 260px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: #cfcfcf;
+                        background: transparent;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 8px;
+
+                            Text { text: "Output Path:"; font-weight: 600; color: #000000; font-size: 14px; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                LineEdit {
+                                    text: AppGlobals.output-path;
+                                    horizontal-stretch: 1;
+                                    font-size: 12px;
+                                    edited => { AppGlobals.output-path = self.text; }
+                                }
+                                ActionButton { text: "Open"; clicked => { AppGlobals.browse-folder(); } }
+                            }
+
+                            Text {
+                                text: "Double click to change";
+                                color: #000000;
+                                font-size: 12px;
+                            }
+
+                            Rectangle {
+                                height: 130px;
+                                background: #ffffff;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #e0e0e0;
+                                
+
+                                VerticalLayout {
+                                    padding: 5px;
+                                    spacing: 1px;
+                                    
+                                    Text { font-size: 12px; text: "Number of Files: " + AppGlobals.num-files-text; color: #000000; }
+                                    Text { font-size: 12px; text: "Completed: " + AppGlobals.completed-files-text; color: #000000; }
+                                    Text { font-size: 12px; text: "Before Size: " + AppGlobals.before-size-text + " MB"; color: #000000; }
+                                    Text { font-size: 12px; text: "After Size: " + AppGlobals.after-size-text + " MB"; color: #000000; }
+                                    Text { font-size: 12px; text: AppGlobals.percent-saved-text + "% saved"; color: #000000; }
+                                    Text { font-size: 12px; text: AppGlobals.mb-per-sec-text + " MB/s"; color: #000000; }
+                                    Text { font-size: 12px; text: "Elapsed: " + AppGlobals.elapsed-time-text + " s"; color: #000000; }
+                                    
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Format:"; vertical-alignment: center; color: #000000; }
+                                ComboBox {
+                                    model: ["jpg", "webp", "png", "bmp", "gif", "tiff", "ico"];
+                                    min-height: 24px;
+                                    min-width: 70px;
+                                    current-value: AppGlobals.format;
+                                    selected => { AppGlobals.format = self.current-value; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Quality:"; vertical-alignment: center; color: #000000; }
+                                SpinBox {
+                                    minimum: 0;
+                                    maximum: 100;
+                                    min-height: 24px;
+                                    min-width: 60px;
+                                    value: AppGlobals.quality;
+                                    edited => { AppGlobals.quality = self.value; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Resolution:"; vertical-alignment: center; color: #000000; }
+                                SpinBox {
+                                    minimum: 1;
+                                    maximum: 100;
+                                    min-height: 24px;
+                                    min-width: 60px;
+                                    value: AppGlobals.resolution;
+                                    enabled: AppGlobals.resize-mode == "percent";
+                                    edited => { AppGlobals.resolution = self.value; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Resize Mode:"; vertical-alignment: center; color: #000000; }
+                                ComboBox {
+                                    model: ["percent", "max"];
+                                    min-height: 24px;
+                                    min-width: 80px;
+                                    current-value: AppGlobals.resize-mode;
+                                    selected => { AppGlobals.resize-mode = self.current-value; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Max Res:"; vertical-alignment: center; color: #000000; }
+                                ComboBox {
+                                    model: ["4k", "1440p", "1080p"];
+                                    min-height: 24px;
+                                    min-width: 80px;
+                                    current-value: AppGlobals.max-res-preset;
+                                    enabled: AppGlobals.resize-mode == "max";
+                                    selected => { AppGlobals.set-max-res-preset(self.current-value); }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Filter:"; vertical-alignment: center; color: #000000; }
+                                ComboBox {
+                                    model: ["catmullrom", "triangle", "lanczos3", "nearest"];
+                                    min-height: 24px;
+                                    min-width: 90px;
+                                    current-value: AppGlobals.resize-filter;
+                                    selected => { AppGlobals.resize-filter = self.current-value; }
+                                }
+                                Rectangle { width: 0; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { font-size: 12px; text: "Threads:"; vertical-alignment: center; color: #000000; }
+                                Slider {
+                                    minimum: 1;
+                                    maximum: AppGlobals.max-threads;
+                                    step: 1;
+                                    value: AppGlobals.threads;
+                                    changed => { AppGlobals.threads = round(self.value); }
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    font-size: 12px;
+                                    text: AppGlobals.threads + " / " + AppGlobals.max-threads;
+                                    vertical-alignment: center;
+                                    color: #000000;
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: 130px;
+                            ActionButton {
+                                width: 124px;
+                                text: "Optimal Settings";
+                                
+                                //high_contrast: true;
+                                clicked => { AppGlobals.optimal-settings(); }
+                                }
+                    }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                ActionButton {
+                                    text: "Cancel";
+                                   // high_contrast: true;
+                                    clicked => { AppGlobals.cancel-conversion(); }
+                                }
+                                ActionButton {
+                                    text: AppGlobals.is-converting
+                                        ? ("Converting " + round(AppGlobals.progress) + "%")
+                                        : "Convert";
+                                    primary: true;
+                                    high_contrast: true;
+                                    enabled: !AppGlobals.is-converting;
+                                    clicked => { AppGlobals.start-conversion(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ProgressBar {
+            value: AppGlobals.is-converting
+                ? AppGlobals.progress
+                : (AppGlobals.is-scanning-drop ? AppGlobals.drop-progress : AppGlobals.progress);
+            fill-color: AppGlobals.is-scanning-drop && !AppGlobals.is-converting ? #9aa0a6 : #4CAF50;
+            x: 10px;
+            y: parent.height - 24px;
+            width: parent.width - 20px;
+            height: 14px;
+        }
+
+        Text {
+            visible: AppGlobals.is-scanning-drop && !AppGlobals.is-converting;
+            text: AppGlobals.drop-status-text;
+            x: 12px;
+            y: parent.height - 40px;
+            font-size: 11px;
+            color: #555555;
+        }
+    }
+}

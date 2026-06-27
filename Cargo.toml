@@ -1,0 +1,47 @@
+[package]
+name = "resizerrust"
+version = "1.0.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+slint = { version = "1.14", features = ["unstable-winit-030"] }
+image = "0.25"
+tokio = { version = "1.35", features = ["full"] }
+rayon = "1.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+kamadak-exif = "0.5"
+filetime = "0.2"
+anyhow = "1.0"
+rfd = "0.14"
+num_cpus = "1.16"
+dirs = "5.0"
+chrono = "0.4"
+webp = "0.3"
+turbojpeg = { version = "1", default-features = false, features = ["cmake", "require-simd"] }
+fast_image_resize = { version = "6", features = ["image"] }
+
+[build-dependencies]
+slint-build = "1.6"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 0
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+
+[[bin]]
+name = "resizerrust"
+path = "src/main.rs"
