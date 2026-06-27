@@ -43,6 +43,12 @@ the GitHub repo, then ship an update with:
 GitHub Actions will build `resizerrust.exe`, package it as
 `resizerrust-v1.0.1-windows-x64.zip`, and attach it to the GitHub Release.
 
+Release builds check GitHub Releases on startup. If a newer release has
+`resizerrust.exe` and `resizerrust.exe.sha256` assets, the app asks before it
+downloads anything. If accepted, it verifies the SHA-256, replaces the running
+exe, and relaunches. Public updates require a public repo or a
+`RESIZERRUST_GITHUB_TOKEN` environment variable with release access.
+
 ## Dependencies
 
 ### Windows

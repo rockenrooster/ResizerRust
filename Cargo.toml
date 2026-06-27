@@ -21,6 +21,8 @@ chrono = "0.4"
 webp = "0.3"
 turbojpeg = { version = "1", default-features = false, features = ["cmake", "require-simd"] }
 fast_image_resize = { version = "6", features = ["image"] }
+sha2 = "0.11.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 
 [build-dependencies]
 slint-build = "1.6"

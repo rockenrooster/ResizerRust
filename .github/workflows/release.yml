@@ -2,7 +2,6 @@ name: Build and Release
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
@@ -39,21 +38,31 @@ jobs:
         shell: pwsh
         run: |
           $zip = "resizerrust-${{ github.ref_name }}-windows-x64.zip"
+          $exe = "resizerrust.exe"
+          $sha = "resizerrust.exe.sha256"
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target\release\resizerrust.exe dist\resizerrust.exe
           Copy-Item README.md dist\README.md
+          Copy-Item target\release\resizerrust.exe $exe
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $exe" | Set-Content $sha
           Compress-Archive -Path dist\* -DestinationPath $zip -Force
           "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: resizerrust-${{ github.ref_name }}-windows-x64
-          path: ${{ env.ZIP }}
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.EXE }}
+            ${{ env.SHA }}
 
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "${{ env.ZIP }}" --title "ResizerRust ${{ github.ref_name }}" --generate-notes
+        run: gh release create "${{ github.ref_name }}" "${{ env.ZIP }}" "${{ env.EXE }}" "${{ env.SHA }}" --title "ResizerRust ${{ github.ref_name }}" --generate-notes
