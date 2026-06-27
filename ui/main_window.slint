@@ -1,6 +1,7 @@
 import { LineEdit, ComboBox, SpinBox, ListView, Slider } from "std-widgets.slint";
 
 export global AppGlobals {
+    in-out property <string> app-version: "";
     in-out property <string> output-path: "C:\\img";
     in-out property <int> quality: 95;
     in-out property <int> resolution: 100;
@@ -470,7 +471,7 @@ component BlackHeaderTableView {
 }
 
 export component MainWindow inherits Window {
-    title: "ResizerRust 1.0.0 - Batch Image Converter";
+    title: "ResizerRust " + AppGlobals.app-version + " - Batch Image Converter";
     width: 860px;
     height: 570px;
     //default-font-family: "Segoe UI";

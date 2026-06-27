@@ -42,6 +42,8 @@ impl App {
     pub async fn new() -> Result<Self> {
         let ui = MainWindow::new()?;
         
+        ui.global::<AppGlobals>().set_app_version(env!("CARGO_PKG_VERSION").into());
+
         let settings = AppSettings::load()
             .unwrap_or_else(|err| {
                 eprintln!("Failed to load settings: {}, using defaults.", err); // Added logging

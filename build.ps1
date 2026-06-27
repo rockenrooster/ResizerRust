@@ -3,6 +3,7 @@ param(
     [string]$Version,
 
     [switch]$NoIncrement,
+    [switch]$Upx,
     [switch]$NoUpx
 )
 
@@ -110,7 +111,7 @@ if (!(Test-Path $targetExe)) {
 New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 Copy-Item $targetExe $artifactExe -Force
 
-if (!$NoUpx -and (Test-Path (Join-Path $PSScriptRoot "upx.exe"))) {
+if ($Upx -and !$NoUpx -and (Test-Path (Join-Path $PSScriptRoot "upx.exe"))) {
     Run (Join-Path $PSScriptRoot "upx.exe") @("-3", $artifactExe)
 }
 

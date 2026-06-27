@@ -68,7 +68,7 @@ pub async fn update_if_available() -> Result<()> {
 
     let target_exe = std::env::current_exe().context("current exe path")?;
     let update_exe = write_update_exe(&release.tag_name, &exe_bytes)?;
-    start_replacer(&update_exe, &target_exe)?;
+    start_replacer(&update_exe, &target_exe, release.tag_name.trim_start_matches('v'))?;
     RESTART_STARTED.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -176,7 +176,7 @@ fn parse_version(value: &str) -> Option<[u64; 3]> {
 }
 
 #[cfg(windows)]
-fn start_replacer(update_exe: &Path, target_exe: &Path) -> Result<()> {
+fn start_replacer(update_exe: &Path, target_exe: &Path, expected_version: &str) -> Result<()> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 
@@ -193,13 +193,28 @@ fn start_replacer(update_exe: &Path, target_exe: &Path) -> Result<()> {
          $newExe = {}\n\
          $targetExe = {}\n\
          $workDir = {}\n\
+         $expectedVersion = {}\n\
          try {{ Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue }} catch {{}}\n\
          try {{\n\
-             Copy-Item -LiteralPath $newExe -Destination $targetExe -Force\n\
-             Start-Process -FilePath $targetExe -WorkingDirectory $workDir\n\
+             for ($i = 0; $i -lt 30; $i++) {{\n\
+                 try {{\n\
+                     Copy-Item -LiteralPath $newExe -Destination $targetExe -Force\n\
+                     break\n\
+                 }} catch {{\n\
+                     Start-Sleep -Seconds 1\n\
+                     if ($i -eq 29) {{ throw }}\n\
+                 }}\n\
+             }}\n\
+             $installedVersion = (Get-Item -LiteralPath $targetExe).VersionInfo.ProductVersion\n\
+             if ($installedVersion -notlike \"$expectedVersion*\") {{\n\
+                 throw \"Installed version $installedVersion does not match $expectedVersion.\"\n\
+             }}\n\
          }} catch {{\n\
-             Start-Process -FilePath $targetExe -WorkingDirectory $workDir\n\
+             Add-Type -AssemblyName PresentationFramework\n\
+             [System.Windows.MessageBox]::Show(\"ResizerRust could not install the update.`n`n$($_.Exception.Message)\", \"Update failed\", \"OK\", \"Error\") | Out-Null\n\
+             exit 1\n\
          }}\n\
+         Start-Process -FilePath $targetExe -WorkingDirectory $workDir\n\
          Start-Sleep -Seconds 2\n\
          Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n\
          Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n",
@@ -207,6 +222,7 @@ fn start_replacer(update_exe: &Path, target_exe: &Path) -> Result<()> {
         ps_quote(update_exe),
         ps_quote(target_exe),
         ps_quote(work_dir),
+        ps_quote_text(expected_version),
     );
     std::fs::write(&script_path, script)?;
 
@@ -228,13 +244,18 @@ fn start_replacer(update_exe: &Path, target_exe: &Path) -> Result<()> {
 }
 
 #[cfg(not(windows))]
-fn start_replacer(_update_exe: &Path, _target_exe: &Path) -> Result<()> {
+fn start_replacer(_update_exe: &Path, _target_exe: &Path, _expected_version: &str) -> Result<()> {
     bail!("automatic replacement is only supported on Windows");
 }
 
 #[cfg(windows)]
 fn ps_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "''"))
+}
+
+#[cfg(windows)]
+fn ps_quote_text(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
 #[cfg(test)]
