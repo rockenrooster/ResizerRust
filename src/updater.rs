@@ -3,8 +3,11 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::Duration;
 
 const OWNER: &str = "rockenrooster";
@@ -29,6 +32,20 @@ struct GitHubAsset {
 
 pub fn restart_started() -> bool {
     RESTART_STARTED.load(Ordering::Relaxed)
+}
+
+pub fn run_installer_if_requested() -> Result<bool> {
+    let mut args = std::env::args_os();
+    let _exe = args.next();
+    if args.next().as_deref() != Some(OsStr::new("--resizerrust-install-update")) {
+        return Ok(false);
+    }
+
+    let target_exe = args.next().context("missing update target path")?;
+    if let Err(err) = install_from_current_exe(&PathBuf::from(target_exe)) {
+        show_update_error(&format!("{err:#}"));
+    }
+    Ok(true)
 }
 
 pub async fn update_if_available() -> Result<()> {
@@ -68,7 +85,10 @@ pub async fn update_if_available() -> Result<()> {
 
     let target_exe = std::env::current_exe().context("current exe path")?;
     let update_exe = write_update_exe(&release.tag_name, &exe_bytes)?;
-    start_replacer(&update_exe, &target_exe, release.tag_name.trim_start_matches('v'))?;
+    if let Err(err) = start_installer(&update_exe, &target_exe) {
+        show_update_error(&format!("{err:#}"));
+        return Ok(());
+    }
     RESTART_STARTED.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -176,66 +196,14 @@ fn parse_version(value: &str) -> Option<[u64; 3]> {
 }
 
 #[cfg(windows)]
-fn start_replacer(update_exe: &Path, target_exe: &Path, expected_version: &str) -> Result<()> {
+fn start_installer(update_exe: &Path, target_exe: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
-    use std::process::Command;
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let work_dir = target_exe
-        .parent()
-        .context("target exe has no parent directory")?;
-    let script_path =
-        std::env::temp_dir().join(format!("resizerrust-updater-{}.ps1", std::process::id()));
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'\n\
-         $pidToWait = {}\n\
-         $newExe = {}\n\
-         $targetExe = {}\n\
-         $workDir = {}\n\
-         $expectedVersion = {}\n\
-         try {{ Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue }} catch {{}}\n\
-         try {{\n\
-             for ($i = 0; $i -lt 30; $i++) {{\n\
-                 try {{\n\
-                     Copy-Item -LiteralPath $newExe -Destination $targetExe -Force\n\
-                     break\n\
-                 }} catch {{\n\
-                     Start-Sleep -Seconds 1\n\
-                     if ($i -eq 29) {{ throw }}\n\
-                 }}\n\
-             }}\n\
-             $installedVersion = (Get-Item -LiteralPath $targetExe).VersionInfo.ProductVersion\n\
-             if ($installedVersion -notlike \"$expectedVersion*\") {{\n\
-                 throw \"Installed version $installedVersion does not match $expectedVersion.\"\n\
-             }}\n\
-         }} catch {{\n\
-             Add-Type -AssemblyName PresentationFramework\n\
-             [System.Windows.MessageBox]::Show(\"ResizerRust could not install the update.`n`n$($_.Exception.Message)\", \"Update failed\", \"OK\", \"Error\") | Out-Null\n\
-             exit 1\n\
-         }}\n\
-         Start-Process -FilePath $targetExe -WorkingDirectory $workDir\n\
-         Start-Sleep -Seconds 2\n\
-         Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n\
-         Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n",
-        std::process::id(),
-        ps_quote(update_exe),
-        ps_quote(target_exe),
-        ps_quote(work_dir),
-        ps_quote_text(expected_version),
-    );
-    std::fs::write(&script_path, script)?;
-
-    Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-        ])
-        .arg(script_path)
+    Command::new(update_exe)
+        .arg("--resizerrust-install-update")
+        .arg(target_exe)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .context("starting updater")?;
@@ -244,18 +212,55 @@ fn start_replacer(update_exe: &Path, target_exe: &Path, expected_version: &str) 
 }
 
 #[cfg(not(windows))]
-fn start_replacer(_update_exe: &Path, _target_exe: &Path, _expected_version: &str) -> Result<()> {
+fn start_installer(_update_exe: &Path, _target_exe: &Path) -> Result<()> {
     bail!("automatic replacement is only supported on Windows");
 }
 
-#[cfg(windows)]
-fn ps_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', "''"))
+fn install_from_current_exe(target_exe: &Path) -> Result<()> {
+    let source_exe = std::env::current_exe().context("current updater path")?;
+    let source_hash = sha256_hex(&std::fs::read(&source_exe)?);
+    let mut last_error = None;
+
+    for _ in 0..60 {
+        match std::fs::copy(&source_exe, target_exe) {
+            Ok(_) => {
+                let installed_hash = sha256_hex(&std::fs::read(target_exe)?);
+                if installed_hash == source_hash {
+                    launch_installed(target_exe)?;
+                    return Ok(());
+                }
+                last_error = Some("installed file hash did not match downloaded update".to_string());
+            }
+            Err(err) => last_error = Some(err.to_string()),
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    bail!(
+        "could not replace {}\n{}",
+        target_exe.display(),
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    )
 }
 
-#[cfg(windows)]
-fn ps_quote_text(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+fn launch_installed(target_exe: &Path) -> Result<()> {
+    let mut command = Command::new(target_exe);
+    if let Some(parent) = target_exe.parent() {
+        command.current_dir(parent);
+    }
+    command.spawn().context("relaunching updated app")?;
+    Ok(())
+}
+
+fn show_update_error(message: &str) {
+    MessageDialog::new()
+        .set_level(MessageLevel::Error)
+        .set_title("ResizerRust update failed")
+        .set_description(format!(
+            "ResizerRust could not install the update.\n\n{message}"
+        ))
+        .set_buttons(MessageButtons::Ok)
+        .show();
 }
 
 #[cfg(test)]

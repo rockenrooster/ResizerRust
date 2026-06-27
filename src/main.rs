@@ -14,6 +14,10 @@ use app::App;
 use tokio::runtime::Runtime;
 
 fn main() -> Result<()> {
+    if updater::run_installer_if_requested()? {
+        return Ok(());
+    }
+
     let rt = Runtime::new()?;
 
     rt.block_on(async {
