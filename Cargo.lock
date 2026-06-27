@@ -4411,7 +4411,7 @@ dependencies = [
 
 [[package]]
 name = "resizerrust"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "chrono",
